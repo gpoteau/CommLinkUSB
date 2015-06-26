@@ -8,7 +8,6 @@ License Information
 -------------------
 
 The hardware design is licensed under the [Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).
-
 The USB Stack used in firmware is [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php), created by Dean Camera.
 
 The CommLinkUSB firmware was created by Gregory POTEAU.
