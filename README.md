@@ -7,13 +7,10 @@ It allow to connect Action Replay, Game Hunter, or Clone card on computer over U
 License Information
 -------------------
 
-The hardware design is is licensed under the [Creative Commons Attribution-ShareAlike 4.0 International License.](http://creativecommons.org/licenses/by-sa/4.0/).
-
-The USB Stack used in firmware is LUFA, created by Dean Camera [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php).
-
+The hardware design is licensed under the [Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).
+The USB Stack used in firmware is [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php), created by Dean Camera.
 The CommLinkUSB firmware was created by Gregory POTEAU.
-
-The PARUSB software is Released under a modified MIT license. see Software/License.txt for license details.
+The PARUSB software is released under a modified MIT license. see Software/License.txt for license details.
 
 Repository Contents
 -------------------
