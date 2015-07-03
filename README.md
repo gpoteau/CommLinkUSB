@@ -1,8 +1,8 @@
 CommLinkUSB
 ===========
 
-(https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0828400.JPG)
-(https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0834075.JPG)
+![CommLinkUSB](https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0828400.JPG)
+![CommLinkUSB](https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0834075.JPG)
 
 CommLinkUSB is an open source USB port of the PC Comm Link ISA Card.
 It allow to connect Action Replay, Game Hunter, or Clone card on computer over USB.
