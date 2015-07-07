@@ -17,6 +17,8 @@ The PSEXEU software is released under a modified MIT license. see Software/Licen
 
 Repository Contents
 -------------------
-* **/Firmware** - Firmware
-* **/Hardware** - Hardware design files for the CommLinkUSB PCB. These files were designed in [Eagle](http://http://www.cadsoftusa.com/).
+* **/Firmware**
+    * ADAFRUITU4.hex - Firmware for **Adafruit _Atmega32u4 Breakout Board_**.
+    * TEENSY2.hex - Firmware for **PJRC _Teensy 2.0 USB Development Board_**.
+* **/Hardware** - Hardware design files for the CommLinkUSB. These files were designed in [Eagle](http://http://www.cadsoftusa.com/).
 * **/Software** - DOS/Windows end user software.
