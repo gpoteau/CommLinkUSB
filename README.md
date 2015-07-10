@@ -10,7 +10,7 @@ It allow to connect Action Replay, Game Hunter, or Clone card on computer over U
 License Information
 -------------------
 
-The hardware design is licensed under [Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).  
+The hardware design is licensed under [![Creative Commons License] (https://i.creativecommons.org/l/by-sa/4.0/88x31.png) Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).  
 The USB Stack used in firmware is [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php), created by Dean Camera.  
 The CommLinkUSB firmware was created by Gregory Poteau.  
 The PSEXEU software is released under a modified MIT license. see Software/License.txt for license details.
