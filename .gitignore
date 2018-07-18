@@ -1,1 +1,9 @@
 Software/signdriver/CommLinkUSB.cer
+Firmware/.dep
+*.bin
+*.eep
+*.map
+*.sym
+Firmware/Source/obj
+*.elf
+*.lss
