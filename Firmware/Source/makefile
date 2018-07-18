@@ -11,14 +11,14 @@
 
 # Run "make help" for target help.
 
-MCU          = at90usb1287
+MCU          = atmega32u4
 ARCH         = AVR8
-BOARD        = USBKEY
-F_CPU        = 8000000
+BOARD        = NONE
+F_CPU        = 16000000
 F_USB        = $(F_CPU)
 OPTIMIZATION = s
 TARGET       = BulkVendor
-SRC          = $(TARGET).c Descriptors.c $(LUFA_SRC_USB)
+SRC          = $(TARGET).c Descriptors.c PAR.c $(LUFA_SRC_USB)
 LUFA_PATH    = ../LUFA
 CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/
 LD_FLAGS     =

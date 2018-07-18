@@ -47,16 +47,16 @@ const USB_Descriptor_Device_t PROGMEM DeviceDescriptor =
 {
 	.Header                 = {.Size = sizeof(USB_Descriptor_Device_t), .Type = DTYPE_Device},
 
-	.USBSpecification       = VERSION_BCD(1,1,0),
-	.Class                  = USB_CSCP_NoDeviceClass,
+	.USBSpecification       = VERSION_BCD(2,0,0),
+	.Class                  = USB_CSCP_VendorSpecificClass,
 	.SubClass               = USB_CSCP_NoDeviceSubclass,
 	.Protocol               = USB_CSCP_NoDeviceProtocol,
 
 	.Endpoint0Size          = FIXED_CONTROL_ENDPOINT_SIZE,
 
-	.VendorID               = 0x03EB,
-	.ProductID              = 0x206C,
-	.ReleaseNumber          = VERSION_BCD(0,0,1),
+	.VendorID               = 0x1209,
+	.ProductID              = 0xBAD1,
+	.ReleaseNumber          = VERSION_BCD(1,0,0),
 
 	.ManufacturerStrIndex   = STRING_ID_Manufacturer,
 	.ProductStrIndex        = STRING_ID_Product,
@@ -84,7 +84,7 @@ const USB_Descriptor_Configuration_t PROGMEM ConfigurationDescriptor =
 
 			.ConfigAttributes       = USB_CONFIG_ATTR_RESERVED,
 
-			.MaxPowerConsumption    = USB_CONFIG_POWER_MA(100)
+			.MaxPowerConsumption    = USB_CONFIG_POWER_MA(500)
 		},
 
 	.Vendor_Interface =
@@ -134,13 +134,13 @@ const USB_Descriptor_String_t PROGMEM LanguageString = USB_STRING_DESCRIPTOR_ARR
  *  form, and is read out upon request by the host when the appropriate string ID is requested, listed in the Device
  *  Descriptor.
  */
-const USB_Descriptor_String_t PROGMEM ManufacturerString = USB_STRING_DESCRIPTOR(L"Dean Camera");
+const USB_Descriptor_String_t PROGMEM ManufacturerString = USB_STRING_DESCRIPTOR(L"Gregory Poteau");
 
 /** Product descriptor string. This is a Unicode string containing the product's details in human readable form,
  *  and is read out upon request by the host when the appropriate string ID is requested, listed in the Device
  *  Descriptor.
  */
-const USB_Descriptor_String_t PROGMEM ProductString = USB_STRING_DESCRIPTOR(L"LUFA Bulk Vendor Demo");
+const USB_Descriptor_String_t PROGMEM ProductString = USB_STRING_DESCRIPTOR(L"CommLinkUSB");
 
 /** This function is called by the library when in device mode, and must be overridden (see library "USB Descriptors"
  *  documentation) by the application code so that the address and size of a requested descriptor can be given

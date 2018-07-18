@@ -36,7 +36,7 @@
 
 #define  INCLUDE_FROM_BULKVENDOR_C
 #include "BulkVendor.h"
-
+#include "PAR.h"
 
 /** Main program entry point. This routine configures the hardware required by the application, then
  *  enters a loop to run the application tasks in sequence.
@@ -55,15 +55,22 @@ int main(void)
 		uint8_t ReceivedData[VENDOR_IO_EPSIZE];
 		memset(ReceivedData, 0x00, sizeof(ReceivedData));
 
-		Endpoint_SelectEndpoint(VENDOR_OUT_EPADDR);
-		if (Endpoint_IsOUTReceived())
+		if (PAR_ReadAvailable())
 		{
-			Endpoint_Read_Stream_LE(ReceivedData, VENDOR_IO_EPSIZE, NULL);
-			Endpoint_ClearOUT();
+			uint8_t data = PAR_ReadByte();
 
 			Endpoint_SelectEndpoint(VENDOR_IN_EPADDR);
-			Endpoint_Write_Stream_LE(ReceivedData, VENDOR_IO_EPSIZE, NULL);
+			Endpoint_Write_8(data);
 			Endpoint_ClearIN();
+		}
+		else
+		{
+			Endpoint_SelectEndpoint(VENDOR_OUT_EPADDR);
+			while (Endpoint_BytesInEndpoint() > 0)
+			{
+				uint8_t data = Endpoint_Read_8();
+				PAR_WriteByte(data);
+			}
 		}
 	}
 }
@@ -93,6 +100,7 @@ void SetupHardware(void)
 	/* Hardware Initialization */
 	LEDs_Init();
 	USB_Init();
+	PAR_Init();
 }
 
 /** Event handler for the USB_Connect event. This indicates that the device is enumerating via the status LEDs. */
