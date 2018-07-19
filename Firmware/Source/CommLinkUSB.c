@@ -28,14 +28,8 @@
   this software.
 */
 
-/** \file
- *
- *  Main source file for the Bulk Vendor demo. This file contains the main tasks of the demo and
- *  is responsible for the initial application hardware configuration.
- */
-
-#define  INCLUDE_FROM_BULKVENDOR_C
-#include "BulkVendor.h"
+#define  INCLUDE_FROM_COMMLINKUSB_C
+#include "CommLinkUSB.h"
 #include "PAR.h"
 
 /** Main program entry point. This routine configures the hardware required by the application, then
@@ -52,9 +46,6 @@ int main(void)
 	{
 		USB_USBTask();
 
-		uint8_t ReceivedData[VENDOR_IO_EPSIZE];
-		memset(ReceivedData, 0x00, sizeof(ReceivedData));
-
 		if (PAR_ReadAvailable())
 		{
 			uint8_t data = PAR_ReadByte();
@@ -66,10 +57,18 @@ int main(void)
 		else
 		{
 			Endpoint_SelectEndpoint(VENDOR_OUT_EPADDR);
-			while (Endpoint_BytesInEndpoint() > 0)
+			if (Endpoint_IsOUTReceived())
 			{
-				uint8_t data = Endpoint_Read_8();
-				PAR_WriteByte(data);
+				if (Endpoint_BytesInEndpoint())
+				{
+					uint8_t data = Endpoint_Read_8();
+					PAR_WriteByte(data);
+				}
+
+				if (!Endpoint_BytesInEndpoint())
+				{
+					Endpoint_ClearOUT();
+				}
 			}
 		}
 	}

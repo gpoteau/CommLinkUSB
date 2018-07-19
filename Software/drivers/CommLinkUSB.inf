@@ -40,8 +40,8 @@
 
 DeviceName = "CommLinkUSB"
 VendorID = "VID_1209"
-ProductID = "PID_BAD1"
-DeviceGUID = "{9330DC52-5DF6-4696-B876-D461E1EDA6A6}"
+ProductID = "PID_BAD2"
+DeviceGUID = "{7d5098b2-3031-4d09-ad8e-f8434c1587a9}"
 DeviceClassGUID = "{78a1c341-4539-11d3-b88d-00c04fad5171}"
 ; Date MUST be in MM/DD/YYYY format
 Date = "06/28/2015"
@@ -99,7 +99,7 @@ Needs=WINUSB.NT
 ; The Include directive in the USB_Install.Services section includes the system-
 ; supplied INF for WinUSB. This INF is installed by the WinUSB co-installer if 
 ; it is not already on the target system. The AddService directive specifies 
-; WinUsb.sys as the device’s function driver. These directives should not be 
+; WinUsb.sys as the deviceï¿½s function driver. These directives should not be 
 ; modified.
 [USB_Install.Services]
 Include=winusb.inf
@@ -127,7 +127,7 @@ KmdfLibraryVersion=1.9
 ; USB_Install.HW is the key section in the INF. It specifies the device 
 ; interface globally unique identifier (GUID) for your device. The AddReg 
 ; directive puts the interface GUID in a standard registry value. When 
-; WinUsb.sys is loaded as the device’s function driver, it reads the registry
+; WinUsb.sys is loaded as the deviceï¿½s function driver, it reads the registry
 ; value and uses the specified GUID to represent the device interface. You 
 ; should replace the GUID in this example with one that you create specifically
 ; for your device. If the protocols for the device change, you should create a

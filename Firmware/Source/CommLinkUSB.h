@@ -28,13 +28,8 @@
   this software.
 */
 
-/** \file
- *
- *  Header file for BulkVendor.c.
- */
-
-#ifndef _BULK_VENDOR_H_
-#define _BULK_VENDOR_H_
+#ifndef _COMMLINKUSB_H_
+#define _COMMLINKUSB_H_
 
 	/* Includes: */
 		#include <avr/io.h>
