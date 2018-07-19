@@ -105,11 +105,7 @@
 #include    <string.h>
 #include    <fcntl.h>
 #include    <sys/stat.h>
-#include    <sys/io.h>
 #include    <strings.h>
-#include    <linux/parport.h>
-#include    <linux/ppdev.h>
-#include    <sys/io.h>
 #include    <sys/ioctl.h>
 #include    <unistd.h>
 #include    "CArgs.h"
@@ -537,7 +533,7 @@ int CmdCallback_Receive(int argc, char *argv[]) {
 		return(EXIT_FAILURE);
 	}
 
-	if (Len = ParseNumber(add)) {
+	if ((Len = ParseNumber(add)) != 0) {
 // Initialise our comms port
 
 		printf("Initializing Caetla...\n");
@@ -2480,7 +2476,7 @@ char *NextLine(char *in) {
 
 int FileExists(char *fname) {
 	FILE    *fp;
-	if (fp = fopen(fname, "rb")) {
+	if ((fp = fopen(fname, "rb")) != NULL) {
 		fclose(fp);
 		return(1);
 	} else {

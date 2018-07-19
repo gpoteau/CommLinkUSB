@@ -69,7 +69,7 @@ void CArgs::SetRange(int min, int max) {
 	else
 		m_ArgMin = min;
 
-	if ((max < 0) || (max >= m_ArgC) || (m_ArgMin < m_ArgMin))
+	if ((max < 0) || (max >= m_ArgC) || (max < m_ArgMin))
 		m_ArgMax = -1;
 	else
 		m_ArgMax = max + 1;
