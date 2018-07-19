@@ -1,0 +1,3 @@
+cmake_minimum_required (VERSION 2.6)
+project (catflapu)
+add_executable(capflapu CArgs.cpp CArgs.h Catflap.cpp CCaetla.cpp CCaetla.h CCaetlaDefs.h common_defs.h NagFlash.c)
