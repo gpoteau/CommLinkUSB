@@ -4,21 +4,22 @@ CommLinkUSB
 ![CommLinkUSB](https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0828400.JPG)
 ![CommLinkUSB](https://raw.githubusercontent.com/gpoteau/CommLinkUSB/master/Hardware/IMG_20150629_0834075.JPG)
 
-CommLinkUSB is an open source USB port of the PC Comm Link ISA Card.
-It allow to connect Action Replay, Game Hunter, or Clone card on computer over USB.
+CommLinkUSB is an open source USB adapter, it is effectively a replacement for the obsolete and hard to use ISA CommLink adapter.
+It allows you to connect Action Replay, Game Hunter, or Clone card to a computer over USB.
 
 License Information
 -------------------
 
+This project is derived from https://github.com/gpoteau/CommLinkUSB. However, the firmware and host software have been rewritten or replaced.
+
 The hardware design is licensed under [![Creative Commons License] (https://i.creativecommons.org/l/by-sa/4.0/88x31.png) Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).  
-The USB Stack used in firmware is [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php), created by Dean Camera.  
-The CommLinkUSB firmware was created by Gregory Poteau.  
-The PSEXEU software is released under a modified MIT license. see Software/License.txt for license details.
+The USB Stack used in the firmware is [LUFA](http://http://www.fourwalledcubicle.com/LUFA.php), created by Dean Camera.  
+The CommLinkUSB firmware was created by Carsten Elton Sørensen.  
+The CATFLAPU software is released under an unknown open source license. It is based on https://github.com/hkzlab/catflap4linux.
 
 Repository Contents
 -------------------
 * **/Firmware**
-    * ADAFRUITU4.hex - Firmware for **Adafruit _Atmega32u4 Breakout Board_**.
-    * TEENSY2.hex - Firmware for **PJRC _Teensy 2.0 USB Development Board_**.
+    * CommLinkUSB.hex - Firmware for Atmega32u4 boards.
 * **/Hardware** - Hardware design files for the CommLinkUSB. These files were designed in [Eagle](http://http://www.cadsoftusa.com/).
-* **/Software** - DOS/Windows end user software.
+* **/Software** - Host software and Windows driver.
