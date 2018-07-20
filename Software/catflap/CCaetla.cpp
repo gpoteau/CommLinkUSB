@@ -23,21 +23,16 @@
 #include    <string.h>
 #include    <fcntl.h>
 #include    <sys/stat.h>
-#include    <sys/io.h>
 #include    <sys/ioctl.h>
 #include    <sys/types.h>
 #include    <sys/time.h>
 #include    <unistd.h>
-#include    <linux/parport.h>
-#include    <linux/ppdev.h>
 
 #include    "CCaetla.h"
 
 #define     complete(x) { m_ErrorCode=x; return(x); }
 
 #define     _SECONDS(x) ((int)((float)x*1000))
-
-extern char PPdevice[MAX_PPDEV_SIZE];
 
 static int          pp_fd;
 static uint8   last_data;
@@ -53,25 +48,6 @@ uint32 GetTickCount(void) {
 }
 
 
-void InitPP(void) {
-	fprintf(stdout, "Initializing device %s ...\n", PPdevice);
-
-	pp_fd = open(PPdevice, O_RDWR);
-	if (pp_fd == -1) {
-		perror("open");
-		exit(1);
-	}
-
-	if (ioctl(pp_fd, PPCLAIM)) {
-		perror("PPCLAIM");
-		close(pp_fd);
-		exit(1);
-	}
-
-	last_data = 0;
-}
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor
 
@@ -83,8 +59,6 @@ CCaetla::CCaetla() {
 //	m_Status=STATUS_BAD;
 	m_ErrorCode = CAETLA_ERROR_OK;
 	m_FilePtr = NULL;
-	m_Port = CAETLA_DEF_PORT;
-	m_CartType = CAETLA_DEF_CART;
 	m_TimeOut = _SECONDS(5);
 // m_RealTimeOut is a legacy. It is currently *always* true, phase out once
 // 100% certain it's outstayed its welcome.
@@ -221,6 +195,7 @@ struct CaetlaErrorMsg CaetlaErrs[] = {
 	{ CAETLA_ERROR_MC_CARDFULL  , "Error: insufficient space on Memory Card" },
 	{ CAETLA_ERROR_MC_NOTFORMATTED  , "Error: Memory Card is not formatted" },
 	{ CAETLA_ERROR_MC_FILEEXISTS    , "Error: Filename already present on Memory Card" },
+	{ CAETLA_ERROR_DEVICE_NOT_PRESENT, "CommLinkUSB device not present" },
 	{ -1, NULL },
 };
 
@@ -247,22 +222,17 @@ int CCaetla::ShowError(void) {
 ////////////////////////////////////////////////////////////////////////////////
 // Init the CCaetla class, specifying a port address and cartridge type
 
-void CCaetla::Init(int port, int cart) {
+void CCaetla::Init() {
 	m_ErrorCode = CAETLA_ERROR_OK;
 
-	m_Port = port;
-
-	if ((cart >= 0) && (cart < CART_MAX))
-		m_CartType = cart;
-
-	// Init ppdev
-	InitPP();
+	if (!m_CommLinkUSB.Initialize()) {
+		m_ErrorCode = CAETLA_ERROR_DEVICE_NOT_PRESENT;
+		return; 
+	}
 
 	CloseLogFile();
 
 	OpenLogFile();
-
-	CreateXPLookup();
 }
 
 
@@ -328,34 +298,16 @@ int CCaetla::QueryMode(void) {
 	IssueCommand(CAETLA_REQUESTPCCONTROL);
 //printf("q2");
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("q3");
 	r = Swap8(0xff);
 //printf("q4");
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
-//printf("q5");
-	switch (m_CartType) {
-//printf("q6");
-	case CART_XP:
-//			r=ByteIn(m_Port);
-		s = ByteIn(m_Port);
-//			r=Swap8(0);
-//printf("q7");
-//			s=ByteIn(m_Port);
-//			s=0;
-//			s=Swap8(0);
-//printf("q8");
-		break;
-
-	default:
-	case CART_PAR:
-		r = Swap8(0);
-		s = Swap8(0);
-		break;
-	}
+	r = Swap8(0);
+	s = Swap8(0);
 //printf("q9");
 
 //	printf("Mode == %d [0x%02x]\n",r,s);
@@ -376,7 +328,7 @@ int CCaetla::ChooseMainOrDebug(void) {
 	curMode = QueryMode();
 //printf("Q2");
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("Q3");
 
@@ -385,7 +337,7 @@ int CCaetla::ChooseMainOrDebug(void) {
 		Listen(CAETLA_MODE_DEBUG);
 //printf("Q5");
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 //printf("Q6");
@@ -402,7 +354,7 @@ int CCaetla::ServerMode(int mode) {
 
 	IssueCommand(CAETLA_CONSOLEMODE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	if (mode)
 		r = Send8(1);
@@ -425,322 +377,23 @@ int CCaetla::Resume(void) {
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// Build lookup table for XPlorer protocol
-
-void CCaetla::CreateXPLookup(void) {
-	int             dx;
-//	uint8    byte,b1,b2,b3,b4;
-//	uint16   w1;
-
-	uint8   XpAs[] = {0x04, 0x05, 0x06, 0x07, 0x0c, 0x0d, 0x0e, 0x0f, 0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0a, 0x0b};
-
-	for (dx = 0; dx < 256; dx++) {
-		m_XPLookups[dx] = XpAs[dx/16];
-	}
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-//
-// Abstract functions to read/write a raw byte to a port address
-//
-// These are the lowest level we can go, and cover us against PAR,XP,NT
-//
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Read a raw port byte
-
-uint8 CCaetla::RawPortIn(int port) {
-	uint8 read_data = 0;
-
-	switch (port) {
-	case 0x378: // Data
-		return last_data;
-		break;
-	case 0x379: // Status
-		ioctl(pp_fd, PPRSTATUS, &read_data);
-		break;
-	case 0x37A: // Control
-		ioctl(pp_fd, PPRCONTROL, &read_data);
-		break;
-	};
-
-	return read_data;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Write a byte
-
-void CCaetla::RawPortOut(int port, uint8 data) {
-	int direction = 0;
-
-	switch (port) {
-	case 0x378: // Data
-		last_data = data;
-		ioctl(pp_fd, PPDATADIR, &direction);
-		ioctl(pp_fd, PPWDATA, &data);
-		break;
-	case 0x379: // Status
-		// no writes here...
-		break;
-	case 0x37A: // Control
-		ioctl(pp_fd, PPWCONTROL, &data);
-		break;
-	};
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// XPlorer handshaking routines
-// These seem a bit messy, but appear to work OK...
-
-uint8 CCaetla::XpAck1(void) {
-	uint8   ina, inb, inc;
-	uint32   oldTime;
-
-	if (m_RealTimeOut) {
-		oldTime = GetTickCount();
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if ((inb & 0x08) != 0) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (GetTickCount() < oldTime + m_TimeOut);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	} else {
-		oldTime = m_TimeOut;
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if ((inb & 0x08) != 0) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (oldTime--);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	}
-
-}
-
-uint8 CCaetla::XpAck1_N(void) {
-	uint8   ina, inb, inc;
-	uint32   oldTime;
-
-	if (m_RealTimeOut) {
-		oldTime = GetTickCount();
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if ((inb & 0x08) == 0) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (GetTickCount() < oldTime + m_TimeOut);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	} else {
-		oldTime = m_TimeOut;
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if ((inb & 0x08) == 0) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (oldTime--);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	}
-
-}
-
-uint8 CCaetla::XpAck2(void) {
-	uint8   ina, inb, inc;
-	uint32   oldTime;
-
-	if (m_RealTimeOut) {
-		oldTime = GetTickCount();
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if (inb != 0x08) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (GetTickCount() < oldTime + m_TimeOut);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	} else {
-		oldTime = m_TimeOut;
-
-		do {
-			ina = RawPortIn(m_Port + 1);
-			inb = m_XPLookups[ina];
-			if (inb != 0x08) {
-				inc = RawPortIn(m_Port + 1);
-				if (inc == ina)
-					return(inc);
-			}
-		} while (oldTime--);
-
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return(inc);
-	}
-
-}
-
-#if 0   //DISABLE
-uint8 CCaetla::XpAck2_N(void) {
-	uint8   ina, inb, inc;
-
-getit:
-	ina = RawPortIn(m_Port + 1);
-	inb = m_XPLookups[ina];
-#if ( USING_XP && DEBUG_XP )
-	Dump("_2 0x%x (0x%x)\n", inb, ina);
-#endif
-	if ((inb & 0x08) != 0) goto    getit;
-
-	inc = RawPortIn(m_Port + 1);
-	if (inc != ina)  goto    getit;
-
-	return(inc);
-}
-#endif  //DISABLE
-
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Get a Byte from I/O
-
-uint8 CCaetla::ByteIn(int port) {
-	switch (m_CartType) {
-	case CART_XP: {
-		uint8 in1, in2, in3, tmp;
-
-		in1 = XpAck1();
-		RawPortOut(port + 2, RawPortIn(port + 2) & 0xf7);
-		in2 = XpAck1_N();
-		RawPortOut(port + 2, RawPortIn(port + 2) | 0x08);
-		in3 = XpAck1();
-		RawPortOut(port + 2, RawPortIn(port + 2) & 0xf7);
-		XpAck1_N();
-		RawPortOut(port + 2, RawPortIn(port + 2) | 0x08);
-//			XpAck2_N();
-		tmp = (((in1 & 0x30) << 2) | (((~in2) & 0x80) >> 2) | ((in2 & 0x30) >> 1) | (((~in3) & 0x80) >> 5) | ((in3 & 0x30) >> 4));
-		return(tmp);
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		return(RawPortIn(port));
-		break;
-	}
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Put a Byte to I/O
-
-void CCaetla::ByteOut(int port, uint8 data) {
-	switch (m_CartType) {
-	case CART_XP: {
-		RawPortOut(port, data);
-		RawPortOut(port + 2, RawPortIn(port + 2) & 0xf7);
-		XpAck1();
-		RawPortOut(port + 2, RawPortIn(port + 2) | 0x08);
-		XpAck2();
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		RawPortOut(port, data);
-		break;
-	}
-}
-
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Wait for handshake
-
-int CCaetla::Handshake(int port) {
-	switch (m_CartType) {
-	case CART_XP:
-		return(0);
-		break;
-
-	default:
-	case CART_PAR:
-		return(RawPortIn(port + 2) & 0x01);
-		break;
-	}
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
 // Exchange Byte
 // Used for both Send & Receive, as each mode ignores the inappropriate data
 
 uint8 CCaetla::Swap8(uint8 data) {
-	uint32 timer = m_TimeOut;
-
 	m_ErrorCode = CAETLA_ERROR_OK;
 
-
-	ByteOut(m_Port, data);
-
-	if (m_RealTimeOut) {
-		uint32   oldTick;
-		oldTick = GetTickCount();
-		while (Handshake(m_Port)) {
-			if (GetTickCount() > oldTick + m_TimeOut) {
-				timer = m_TimeOut;
-				m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-				RawPortOut(m_Port, 0);
-				RawPortOut(m_Port + 2, 0);
-				return 0;
-			}
-		}
-	} else {
-		while (Handshake(m_Port)) {
-			if (timer && --timer == 0) {
-				timer = m_TimeOut;
-				m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-				RawPortOut(m_Port, 0);
-				RawPortOut(m_Port + 2, 0);
-				return 0;
-			}
-		}
+	if (!m_CommLinkUSB.SendByte(data, m_TimeOut)) {
+		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
+		return 0;
 	}
 
-	return ByteIn(m_Port);
+	if (!m_CommLinkUSB.ReceiveByte(&data, m_TimeOut)) {
+		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
+		return 0;
+	}
 
+	return data;
 }
 
 
@@ -749,49 +402,7 @@ uint8 CCaetla::Swap8(uint8 data) {
 // NO input retrieval for X-Plorer
 
 uint8 CCaetla::Send8(uint8 data) {
-	uint32 timer = m_TimeOut;
-
-	m_ErrorCode = CAETLA_ERROR_OK;
-
-
-	ByteOut(m_Port, data);
-
-	if (m_RealTimeOut) {
-		uint32   oldTick;
-		oldTick = GetTickCount();
-		while (Handshake(m_Port)) {
-			if (GetTickCount() > oldTick + m_TimeOut) {
-				timer = m_TimeOut;
-				m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-				RawPortOut(m_Port, 0);
-				RawPortOut(m_Port + 2, 0);
-				return 0;
-			}
-		}
-	} else {
-		while (Handshake(m_Port)) {
-			if (timer && --timer == 0) {
-				timer = m_TimeOut;
-				m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-				RawPortOut(m_Port, 0);
-				RawPortOut(m_Port + 2, 0);
-				return 0;
-			}
-		}
-	}
-
-//		return ByteIn(m_Port);
-	switch (m_CartType) {
-	case CART_XP:
-		return(0);
-		break;
-
-	default:
-	case CART_PAR:
-		return ByteIn(m_Port);
-		break;
-	}
-
+	return Swap8(data);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -813,73 +424,21 @@ uint32 CCaetla::Send32(uint32 data) {
 // Fetch byte from port
 
 uint8 CCaetla::Get8(void) {
-	switch (m_CartType) {
-	case CART_XP:
-		return ByteIn(m_Port);
-		break;
-
-	default:
-	case CART_PAR:
-		return(Swap8(0));
-		break;
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Fetch byte from port, with NO prior send (primarily for exported low-level
-// functionality such as required by CatFlap DLL)
-
-uint8 CCaetla::Get8s(void) {
-	return ByteIn(m_Port);
+	return Swap8(0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Fetch half-word (16-bits)
 
 uint16 CCaetla::Receive16(void) {
-	switch (m_CartType) {
-	case CART_XP: {
-		uint8 b1, b2;
-		b1 = ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  return(0);
-		b2 = ByteIn(m_Port);
-		return ((b1 << 8) | (b2));
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		return ((Swap8(1) << 8) | (Swap8(2)));
-		break;
-	}
+	return (Swap8(1) << 8) | (Swap8(2));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Fetch word (32-bits)
 
 uint32 CCaetla::Receive32(void) {
-//	return ( (Swap8(1)<<24) | (Swap8(2)<<16) | (Swap8(3)<<8) | (Swap8(4)) );
-//	return ( (Swap8(0)<<24) | (Swap8(0)<<16) | (Swap8(0)<<8) | (Swap8(0)) );
-	switch (m_CartType) {
-	case CART_XP: {
-		uint8 b1, b2, b3, b4;
-		b1 = ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  return(0);
-		b2 = ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  return(0);
-		b3 = ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  return(0);
-		b4 = ByteIn(m_Port);
-		return ((b1 << 24) | (b2 << 16) | (b3 << 8) | (b4));
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		return ((Swap8(0) << 24) | (Swap8(0) << 16) | (Swap8(0) << 8) | (Swap8(0)));
-		break;
-	}
-
+	return ((Swap8(0) << 24) | (Swap8(0) << 16) | (Swap8(0) << 8) | (Swap8(0)));
 }
 
 
@@ -894,11 +453,11 @@ int CCaetla::Listen(int mode) {
 retry:
 	IssueCommand(CAETLA_REQUESTPCCONTROL);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	r = Swap8(mode);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if ((r == 0xff) || (r == 0xfe)) {
@@ -923,14 +482,11 @@ int CCaetla::CheckExeStatus(void) {
 
 	IssueCommand(CAETLA_EXESTATUS);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
-	if (m_CartType == CART_XP)
-		r = ByteIn(m_Port);
-	else
-		r = Swap8(0);
+	r = Swap8(0);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Resume();
@@ -995,7 +551,7 @@ int CCaetla::RunExe(char *exename, bool run, bool hooksOn) {
 	SendExe((void *)m_FilePtr);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	m_ExeHooksOn = hooksOn;
@@ -1016,7 +572,7 @@ int CCaetla::RunExe(void *exe, bool run, bool hooksOn) {
 	SendExe(exe);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	m_ExeHooksOn = hooksOn;
@@ -1073,7 +629,7 @@ int CCaetla::SendExe(void *pdata) {
 
 			if (m_ErrorCode != CAETLA_ERROR_OK) {
 				free(pCPE);
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 
 #if 0   //DISABLE
@@ -1099,7 +655,7 @@ int CCaetla::SendExe(void *pdata) {
 
 					cpe += length;
 
-//					if   (m_ErrorCode!=CAETLA_ERROR_OK)  { free(pCPE); complete(m_ErrorCode); }
+//					if   (m_ErrorCode!=CAETLA_ERROR_OK)  { free(pCPE); return m_ErrorCode; }
 
 				}
 				break;
@@ -1178,7 +734,7 @@ int CCaetla::SendExe(void *pdata) {
 	Listen(CAETLA_MODE_MAIN);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 
@@ -1216,7 +772,7 @@ int CCaetla::SendExe(void *pdata) {
 // Skip verify for the moment
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 //	Execute(exe_header);
@@ -1240,27 +796,27 @@ int CCaetla::Execute(PSX_EXE_HEADER *exe_header) {
 	IssueCommand(CAETLA_EXECUTE);
 //Say("1");
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //Say("2");
 	Send32(AR_TCB);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //Say("3");
 	Send32(AR_EVENT);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //Say("4");
 	Send32(exe_header->sp_addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	for (i = 0; i < 15; i++) {
 		Send32(*((uint32 *)exe_header + (0x10 / 4) + i));
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 //Say("5");
@@ -1337,13 +893,13 @@ int CCaetla::Upload(void *pdata, uint32 addr, uint32 length, bool showprogress, 
 //printf("[1]\n");
 		ChooseMainOrDebug();
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 //printf("[2]\n");
 		mode = QueryMode();
 //printf("[3]\n");
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		if (mode == CAETLA_MODE_DEBUG) {
 			return(UploadDbg(pdata, addr, length, showprogress, verbose));
@@ -1353,33 +909,24 @@ int CCaetla::Upload(void *pdata, uint32 addr, uint32 length, bool showprogress, 
 
 	IssueCommand(CAETLA_UPLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(length);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	SendData(pdata, length, showprogress);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP:
-		ck = ByteIn(m_Port);
-		break;
-
-	default:
-	case CART_PAR:
-		ck = Swap8(0);
-		break;
-	}
+	ck = Swap8(0);
 
 	if (verbose)
 		Dump("Sent 0x%x (%d) bytes to 0x%x\n", length, length, addr);
@@ -1398,11 +945,11 @@ int CCaetla::Download(void *pdata, uint32 addr, uint32 length, bool showprogress
 		int mode;
 		ChooseMainOrDebug();
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		mode = QueryMode();
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		if (mode == CAETLA_MODE_DEBUG) {
 			return(DownloadDbg(pdata, addr, length, showprogress, verbose));
@@ -1412,34 +959,25 @@ int CCaetla::Download(void *pdata, uint32 addr, uint32 length, bool showprogress
 
 	IssueCommand(CAETLA_DOWNLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(length);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	ReceiveData(pdata, length, showprogress);
 //	ReceiveData(pdata,length,1);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP:
-		ck = ByteIn(m_Port);
-		break;
-
-	default:
-	case CART_PAR:
-		ck = Swap8(0);
-		break;
-	}
+	ck = Swap8(0);
 
 	if (verbose)
 		Dump("Received 0x%x (%d) bytes from 0x%x\n", length, length, addr);
@@ -1511,16 +1049,7 @@ int CCaetla::ReceiveData(void *pdata, uint32 length, bool showprogress) {
 
 		count = 0;
 		while ((count < length) && (m_ErrorCode == CAETLA_ERROR_OK)) {
-			switch (m_CartType) {
-			case CART_XP:
-				*(data++) = ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				*(data++) = Swap8(0);
-				break;
-			}
+			*(data++) = Swap8(0);
 
 			percent = (sint16)((count * 50) / length);
 			if (percent > lastpercent) {
@@ -1538,16 +1067,7 @@ int CCaetla::ReceiveData(void *pdata, uint32 length, bool showprogress) {
 	} else {
 		count = 0;
 		while ((count < length) && (m_ErrorCode == CAETLA_ERROR_OK)) {
-			switch (m_CartType) {
-			case CART_XP:
-				*(data++) = ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				*(data++) = Swap8(0);
-				break;
-			}
+			*(data++) = Swap8(0);
 //ASH - this was added on 27/9/00 - REALLY STUPID, should have been here for ages
 			count++;
 		}
@@ -1565,17 +1085,7 @@ int CCaetla::ReceiveString(char *x) {
 	uint8 c;
 
 	do  {
-		switch (m_CartType) {
-		case CART_XP:
-			c = ByteIn(m_Port);
-			break;
-
-		default:
-		case CART_PAR:
-			c = Swap8(0);
-			break;
-		}
-
+		c = Swap8(0);
 		*x++ = c;
 	} while ((c) && (m_ErrorCode == CAETLA_ERROR_OK));
 
@@ -1600,19 +1110,19 @@ int CCaetla::SendString(char *x) {
 int CCaetla::UpdateByte(uint32 addr, uint8 data) {
 	IssueCommand(CAETLA_DEBUG_UPDATEBYTE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send8(data);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	return(m_ErrorCode);
+	return m_ErrorCode;
 }
 
 
@@ -1627,7 +1137,7 @@ int CCaetla::GetRegisters(void *raddr) {
 
 	IssueCommand(CAETLA_DEBUG_GETREGISTERS);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	for (int r = 0; r < 36; r++) {
@@ -1636,19 +1146,19 @@ int CCaetla::GetRegisters(void *raddr) {
 		uint8 b1, b2, b3, b4;
 		b1 = Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		b2 = Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		b3 = Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		b4 = Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		*addr++ = (b1 << 24) | (b2 << 16) | (b3 << 8) | (b4) ;
 	}
@@ -1665,95 +1175,67 @@ int CCaetla::DownloadDbg(void *pdata, uint32 addr, uint32 length, bool showprogr
 
 	IssueCommand(CAETLA_DEBUG_DOWNLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	if (m_CartType == CART_XP) {
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	} else {
-		Swap8(1);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Swap8(2);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Swap8(3);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Swap8(4);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
+	Swap8(1);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
+	}
+	Swap8(2);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
+	}
+	Swap8(3);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
+	}
+	Swap8(4);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
 	}
 
 //printf("@1\n");
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(length);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@2\n");
 
 	ReceiveData(pdata, length, showprogress);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@3\n");
 
-	if (m_CartType == CART_XP)
-		ck = ByteIn(m_Port);
-	else
-		ck = Swap8(0);
+	ck = Swap8(0);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@4\n");
 
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(0);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@5\n");
 
-	if (m_CartType == CART_XP)
-		ck = ByteIn(m_Port);
-	else
-		ck = Swap8('O');
+	ck = Swap8('O');
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@6\n");
-	if (m_CartType == CART_XP)
-		ck = ByteIn(m_Port);
-	else
-		ck = Swap8('K');
+	ck = Swap8('K');
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("@7\n");
 	complete(CAETLA_ERROR_OK);
@@ -1767,18 +1249,18 @@ int CCaetla::UploadDbg(void *pdata, uint32 addr, uint32 length, bool showprogres
 //printf("#1\n");
 	IssueCommand(CAETLA_DEBUG_UPLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("#2\n");
 
 	Send32(addr);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("#3\n");
 	Send32(length);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("#4\n");
 
@@ -1787,7 +1269,7 @@ int CCaetla::UploadDbg(void *pdata, uint32 addr, uint32 length, bool showprogres
 
 	SendData(pdata, length, showprogress);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("#6\n");
 
@@ -1801,11 +1283,11 @@ int CCaetla::UploadDbg(void *pdata, uint32 addr, uint32 length, bool showprogres
 int CCaetla::SetRegister(int reg, uint32 data) {
 	IssueCommand(CAETLA_DEBUG_SETREGISTER);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(reg);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(data);
 	return(m_ErrorCode);
@@ -1819,7 +1301,7 @@ int CCaetla::GetCpCond(void) {
 
 	IssueCommand(CAETLA_DEBUG_GETCPCOND);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	cp = Get8();
 	return(cp);
@@ -1839,23 +1321,23 @@ int CCaetla::FlushICache(void) {
 int CCaetla::SetHBP(uint32 dat1, uint32 dat2, uint32 dat3, uint32 dat4) {
 	IssueCommand(CAETLA_DEBUG_SETHBP);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(dat1);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(dat2);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(dat3);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send32(dat4);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	return(m_ErrorCode);
 
@@ -1916,7 +1398,7 @@ int CCaetla::IssueCommand(uint8 command) {
 		r = Swap8('C');
 	}
 
-	if (m_ErrorCode != CAETLA_ERROR_OK)  complete(m_ErrorCode);
+	if (m_ErrorCode != CAETLA_ERROR_OK) return m_ErrorCode;
 
 	if (r != 'd')    complete(CAETLA_ERROR_PROTOCOL);
 
@@ -1962,16 +1444,16 @@ int CCaetla::DosConsole(void) {
 int CCaetla::InitWinConsole(void) {
 	IssueCommand(CAETLA_NOP);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	IssueCommand(CAETLA_CONSOLEMODE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send8(1);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 //	Dump("\n<<< Entering Caetla Console >>>\n\n%s",CAETLA_DOSCON_PROMPT);
@@ -1999,6 +1481,7 @@ int CCaetla::InitWinConsole(void) {
 // Single iteration of the console system
 
 int CCaetla::WinConsole(void) {
+#if 0
 	static int              toggle = 0;
 //	static int               XpFlagged=0;
 	static uint8    ina, inb; //,inc,tmpa,tmpb,tmpc;
@@ -2028,46 +1511,7 @@ int CCaetla::WinConsole(void) {
 
 	x = 0;
 
-	switch (m_CartType) {
-	case CART_XP: {
-		m_LastXpFlagged = m_XpFlagged;
-		if (toggle) {
-			switch (m_XpFlagged) {
-			case 0:
-				RawPortOut(m_Port, 'P');
-				RawPortOut(m_Port + 2, RawPortIn(m_Port + 2) & 0xf7);
-				m_XpFlagged++;
-				break;
-
-			case 1:
-				ina = RawPortIn(m_Port + 1);
-				inb = m_XPLookups[ina];
-				if ((inb & 0x08) != 0) {
-					ByteOut(m_Port, 'P');
-					m_XpFlagged++;
-				}
-				break;
-
-			case 2:
-				ina = RawPortIn(m_Port + 1);
-				inb = m_XPLookups[ina];
-				if ((inb & 0x08) != 0) {
-					x = ByteIn(m_Port);
-					m_XpFlagged = 0;
-				}
-				break;
-			}
-
-			toggle = 0;
-		} else {
-			toggle = 1;
-			x = 0;
-		}
-	}
-	break;
-
-	default:
-	case CART_PAR: {
+	{
 #if 1   //DISABLE
 		uint32 startTime, curTime;
 
@@ -2092,24 +1536,13 @@ int CCaetla::WinConsole(void) {
 			x = 0;
 #endif  //DISABLE
 	}
-	break;
-	}
 
 // OK, so now that the magic is all done, we have our first feedback from Caetla.
 // As specified in the protocol, we should get a 'd' back from our 'P' sent.
 
 	if (x == 'd') {
 		if (Swap8('R') == 'o') {
-			switch (m_CartType) {
-			case CART_XP:
-				x = ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				x = Swap8(0);
-				break;
-			}
+			x = Swap8(0);
 
 // We've got the server command now, go and do whatever we have to do with it
 
@@ -2280,8 +1713,10 @@ int CCaetla::WinConsole(void) {
 
 	}   //m_AutoSense
 
-
 	return(m_ErrorCode);
+#else
+	return CAETLA_ERROR_UNKNOWN;
+#endif
 }
 
 
@@ -2289,6 +1724,7 @@ int CCaetla::WinConsole(void) {
 // Terminate the console system
 
 int CCaetla::EndWinConsole(void) {
+#if 0
 	if (m_ConsoleLinkStatus) {
 		IssueCommand(CAETLA_CONSOLEMODE);
 		Send8(0);
@@ -2299,6 +1735,9 @@ int CCaetla::EndWinConsole(void) {
 	m_InConsole = false;
 
 	return(m_ErrorCode);
+#else
+	return CAETLA_ERROR_UNKNOWN;
+#endif
 }
 
 
@@ -2319,19 +1758,10 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		Say("PutChar\n");
 #endif
 
-		switch (m_CartType) {
-		case CART_XP:
-			letter = ByteIn(m_Port);
-			break;
-
-		default:
-		case CART_PAR:
-			letter = Swap8(0);
-			break;
-		}
+		letter = Swap8(0);
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 		OutputBuff[outring] = letter;
@@ -2368,15 +1798,15 @@ int CCaetla::ServerCommand(uint8 cmd) {
 				if (m_KeyIn) {
 					Listen(CAETLA_MODE_DEBUG);
 					if (m_ErrorCode != CAETLA_ERROR_OK)  {
-						complete(m_ErrorCode);
+						return m_ErrorCode;
 					}
 					UpdateByte(m_KeyIn, 0x0a);
 					if (m_ErrorCode != CAETLA_ERROR_OK)  {
-						complete(m_ErrorCode);
+						return m_ErrorCode;
 					}
 					Resume();
 					if (m_ErrorCode != CAETLA_ERROR_OK)  {
-						complete(m_ErrorCode);
+						return m_ErrorCode;
 					}
 				}
 
@@ -2403,22 +1833,13 @@ int CCaetla::ServerCommand(uint8 cmd) {
 
 		ReceiveString((char *)&ServerBuff);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
-		switch (m_CartType) {
-		case CART_XP:
-			mode = ByteIn(m_Port);
-			break;
-
-		default:
-		case CART_PAR:
-			mode = Swap8(0);
-			break;
-		}
+		mode = Swap8(0);
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 		rc = open((char *)ServerBuff, O_RDWR);
@@ -2430,11 +1851,11 @@ int CCaetla::ServerCommand(uint8 cmd) {
 #endif
 		Send8(rc < 0 ? 0xff : 0x00);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Send16(rc);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2449,37 +1870,19 @@ int CCaetla::ServerCommand(uint8 cmd) {
 
 		ReceiveString((char *)&ServerBuff);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		rc = creat((char *)&ServerBuff, S_IRWXU);
 #if (SHOW_CON_DBG)
 		Dump("[Request to create file ""%s"" : RC==%x]\n", &ServerBuff[0]);
 #endif
-		switch (m_CartType) {
-		case CART_XP: {
-			mode = ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			mode = ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		mode = Swap8(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			mode = Swap8(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			mode = Swap8(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
+		mode = Swap8(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
 
 		rc = open((char *)ServerBuff, O_RDWR);
@@ -2488,11 +1891,11 @@ int CCaetla::ServerCommand(uint8 cmd) {
 #endif
 		Send8(rc < 0 ? 0xff : 0x00);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Send16(rc);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 	}
@@ -2507,35 +1910,13 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		Say("Read\n");
 #endif  //DISABLE
 
-		switch (m_CartType) {
-		case CART_XP: {
-			fd = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			fd |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			size = (ByteIn(m_Port) << 24) | (ByteIn(m_Port) << 16) | (ByteIn(m_Port) << 8) | ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		fd = Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			fd = Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			size = Send32(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
+		size = Send32(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
 
 
@@ -2553,40 +1934,30 @@ int CCaetla::ServerCommand(uint8 cmd) {
 
 			Send32(r);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 
 			SendData(&ServerBuff, r, false);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 
-			switch (m_CartType) {
-			case CART_XP:
-				ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				Swap8(0);
-				break;
-			}
-
+			Swap8(0);
 
 			size -= r;
 			x = 0;
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 		}
 
 		Send32(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Send8(x);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 	}
@@ -2601,35 +1972,13 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		Say("Write\n");
 #endif  //DISABLE
 
-		switch (m_CartType) {
-		case CART_XP: {
-			fd = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			fd |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			size = (ByteIn(m_Port) << 24) | (ByteIn(m_Port) << 16) | (ByteIn(m_Port) << 8) | ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		fd = Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			fd = Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			size = Send32(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
+		size = Send32(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
 
 #if (SHOW_CON_DBG)
@@ -2645,7 +1994,7 @@ int CCaetla::ServerCommand(uint8 cmd) {
 			ShowError();
 #endif  //DISABLE
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 			ReceiveData(&ServerBuff, r, false);
 #if (SHOW_CON_DBG)
@@ -2659,7 +2008,7 @@ int CCaetla::ServerCommand(uint8 cmd) {
 //27/9/00 - TIMEOUT here - WHY?! (temp fix)
 
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 
 #if 0   //DISABLE
@@ -2687,7 +2036,7 @@ int CCaetla::ServerCommand(uint8 cmd) {
 			ShowError();
 #endif  //DISABLE
 
-//27/9/00 - temp fix for TIMEOUT?!              if  (m_ErrorCode!=CAETLA_ERROR_OK)  { complete(m_ErrorCode); }
+//27/9/00 - temp fix for TIMEOUT?!              if  (m_ErrorCode!=CAETLA_ERROR_OK)  { return m_ErrorCode; }
 
 			if ((fd == -1) || (fd == 0xffff)) {
 				ServerBuff[r] = 0;
@@ -2703,11 +2052,11 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		}
 		Send32(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Send8(x);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2720,45 +2069,18 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		Say("Seek\n");
 #endif  //DISABLE
 
-		switch (m_CartType) {
-		case CART_XP: {
-			fd = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			fd |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			off = (ByteIn(m_Port) << 24) | (ByteIn(m_Port) << 16) | (ByteIn(m_Port) << 8) | ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			mode = ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		fd = Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			fd = Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			off = Send32(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			mode = Swap8(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		off = Send32(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
+		mode = Swap8(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-
 
 #if (SHOW_CON_DBG)
 		Dump("[Request to seek in file 0x%x]\n", fd);
@@ -2767,11 +2089,11 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		rc = lseek(fd, off, mode);
 		Send8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Send32(rc);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2783,29 +2105,11 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		Say("Close\n");
 #endif  //DISABLE
 
-		switch (m_CartType) {
-		case CART_XP: {
-			fd = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			fd |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
-
-		default:
-		case CART_PAR: {
-			fd = Send16(0);
-		}
-		break;
-		}
+		fd = Send16(0);
 
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 		close(fd);
@@ -2833,23 +2137,23 @@ int CCaetla::ServerCommand(uint8 cmd) {
 
 		Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 		ReceiveString((char *)&ServerBuff);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 //			for (i=0;i<22;i++) Swap8(0);
 		for (i = 0; i < 22; i++) {
 			Swap8(0);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 		}
 		Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2861,12 +2165,12 @@ int CCaetla::ServerCommand(uint8 cmd) {
 		for (i = 0; i < 22; i++) {
 			Swap8(0);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 		}
 		Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2874,14 +2178,14 @@ int CCaetla::ServerCommand(uint8 cmd) {
 	case 13: {  //chdir
 		ReceiveString((char *)&ServerBuff);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		if (chdir((char *)&ServerBuff) < 0)
 			Swap8(0xff);
 		else
 			Swap8(0x00);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -2915,12 +2219,6 @@ int CCaetla::ServerCommand(uint8 cmd) {
 
 int CCaetla::RawConsole(void) {
 	uint8   c;
-
-
-	if ((m_CartType != CART_PAR)) {
-		Dump("Error - RAW Console not supported for this cartridge type\n");
-		return(0);
-	}
 
 
 	Dump("\n<<< Entering RAW Console (CTRL-C to exit) >>>\n\n%s", CAETLA_DOSCON_PROMPT);
@@ -3072,15 +2370,15 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 		uint8 r;
 		IssueCommand(CAETLA_REQUESTPCCONTROL);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		r = Swap8(CAETLA_MODE_VRAM);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		r = Swap8(r);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3089,7 +2387,7 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 	case CART_PAR: {
 		Listen(CAETLA_MODE_VRAM);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3097,36 +2395,36 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 #endif  //DISABLE
 	Listen(CAETLA_MODE_VRAM);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 #if 0   //DISABLE
 	IssueCommand(CAETLA_FBV_SETTINGS);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	switch (m_CartType) {
 	case CART_XP: {
 		sx = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sy = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sw = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sh = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sd = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3135,23 +2433,23 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 	case CART_PAR: {
 		sx = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sy = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sw = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sh = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sd = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3160,23 +2458,23 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 
 	IssueCommand(CAETLA_FBV_DOWNLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(x);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(y);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(w);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(h);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	vcur = (uint8 *)data;
@@ -3186,17 +2484,7 @@ int CCaetla::DownloadVRAM(void *data, int x, int y, int w, int h, int depth) {
 //	for(i=0;i<w*h;i++)
 	i = 0;
 	while ((i < w * h) && (m_ErrorCode == CAETLA_ERROR_OK)) {
-
-		switch (m_CartType) {
-		case CART_XP:
-			pixel = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
-			break;
-
-		default:
-		case CART_PAR:
-			pixel = Send16(0);
-			break;
-		}
+		pixel = Send16(0);
 
 		pixel = ((pixel & 0xff) << 8) | ((pixel >> 8) & 0xff);
 		if (depth == 3) {
@@ -3279,15 +2567,15 @@ int CCaetla::UploadVRAM(void *data, int x, int y, int w, int h, int depth) {
 		uint8 r;
 		IssueCommand(CAETLA_REQUESTPCCONTROL);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		r = Swap8(CAETLA_MODE_VRAM);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		r = Swap8(r);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3296,7 +2584,7 @@ int CCaetla::UploadVRAM(void *data, int x, int y, int w, int h, int depth) {
 	case CART_PAR: {
 		Listen(CAETLA_MODE_VRAM);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3305,28 +2593,28 @@ int CCaetla::UploadVRAM(void *data, int x, int y, int w, int h, int depth) {
 
 	Listen(CAETLA_MODE_VRAM);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	IssueCommand(CAETLA_FBV_UPLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(x);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(y);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(w);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(h);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	vcur = (uint8 *)data;
@@ -3373,16 +2661,16 @@ int CCaetla::GetVRAMInfo(void *data) {
 	sint16   sx, sy, sw, sh, sd;
 
 	int mode = QueryMode();
-	if (m_ErrorCode)   complete(m_ErrorCode);
+	if (m_ErrorCode)   return m_ErrorCode;
 
 	Listen(CAETLA_MODE_VRAM);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	IssueCommand(CAETLA_FBV_GETINFO);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 #if 0   //DISABLE
@@ -3390,23 +2678,23 @@ int CCaetla::GetVRAMInfo(void *data) {
 	case CART_XP: {
 		sx = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sy = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sw = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sh = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sd = (ByteIn(m_Port) << 8) | ByteIn(m_Port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3415,23 +2703,23 @@ int CCaetla::GetVRAMInfo(void *data) {
 	case CART_PAR: {
 		sx = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sy = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sw = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sh = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		sd = Send16(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 	break;
@@ -3439,23 +2727,23 @@ int CCaetla::GetVRAMInfo(void *data) {
 #endif  //DISABLE
 	sx = Receive16();
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	sy = Receive16();
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	sw = Receive16();
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	sh = Receive16();
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	sd = Receive16();
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	*pShort++ = sx;
@@ -3469,39 +2757,39 @@ int CCaetla::GetVRAMInfo(void *data) {
 
 int CCaetla::SetVRAMInfo(int x, int y, int w, int h, int depth) {
 	int mode = QueryMode();
-	if (m_ErrorCode)   complete(m_ErrorCode);
+	if (m_ErrorCode)   return m_ErrorCode;
 //printf("V");
 	Listen(CAETLA_MODE_VRAM);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("V");
 
 	IssueCommand(CAETLA_FBV_SETINFO);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("V");
 
 	Send16(x);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(y);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(w);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(h);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16((depth == 24) ? 1 : 0);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //printf("V");
 
@@ -3817,73 +3105,39 @@ int CCaetla::ScanMemCards(int port) {
 
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	IssueCommand(0x11);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(port);
 	Send8(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		ret = ByteIn(m_Port) << 8;
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ret |= ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		ret = Send16(0);
-		break;
-	}
+	ret = Send16(0);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	IssueCommand(CAETLA_CARD_CONTENTS);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(port);
 	Send8(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		m_MemCards[port].numfiles = ByteIn(m_Port) << 8;
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		m_MemCards[port].numfiles |= ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	}
-	break;
-
-	default:
-	case CART_PAR:
-		m_MemCards[port].numfiles = Send16(0);
-		break;
-	}
+	m_MemCards[port].numfiles = Send16(0);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 
@@ -3895,79 +3149,26 @@ int CCaetla::ScanMemCards(int port) {
 			data = (uint8 *) & (m_MemCards[port].files[c]);
 
 			for (i = 0; i < 128; i++) {
-				switch (m_CartType) {
-				case CART_XP:
-					data[i] = ByteIn(m_Port);
-					break;
-
-				default:
-				case CART_PAR:
-					data[i] = Swap8(0);
-					break;
-				}
+				data[i] = Swap8(0);
 				if (m_ErrorCode != CAETLA_ERROR_OK)  {
-					complete(m_ErrorCode);
+					return m_ErrorCode;
 				}
 			}
 		}
 
-		switch (m_CartType) {
-		case CART_XP: {
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			m_MemCards[port].status = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			m_MemCards[port].status |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			m_MemCards[port].status = Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
+		m_MemCards[port].status = Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
 	} else {
-		switch (m_CartType) {
-		case CART_XP: {
-//				m_MemCards[port].status=(ByteIn(m_Port)<<8)|ByteIn(m_Port);
-			m_MemCards[port].status = ByteIn(m_Port) << 8;
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			m_MemCards[port].status |= ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
-
-		default:
-		case CART_PAR:
-			m_MemCards[port].status = Send16(0);
-			break;
-		}
+		m_MemCards[port].status = Send16(0);
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 
@@ -3984,25 +3185,7 @@ int CCaetla::GetCardStatus(int port) {
 		return(0);
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		Send8(port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			return(0);
-		}
-		m_MemCards[port].status = ByteIn(m_Port) << 8;
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			return(0);
-		}
-		m_MemCards[port].status |= ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			return(0);
-		}
-	}
-	break;
-
-	default:
-	case CART_PAR: {
+	{
 		Swap8(port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
 			return(0);
@@ -4011,8 +3194,6 @@ int CCaetla::GetCardStatus(int port) {
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
 			return(0);
 		}
-	}
-	break;
 	}
 
 //Dump("Card Status: 0x%x\n",m_MemCards[port].status);
@@ -4041,7 +3222,7 @@ int CCaetla::ReadMemCardFile(char *name, int port, int mfile) {
 	DownloadMemCardFile((void *)&m_MemCardImages[port], port, mfile);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (m_MemCardFileSize) {
@@ -4071,7 +3252,7 @@ int CCaetla::DownloadMemCardFile(void *dest, int port, int mfile) {
 
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (!(GetCardStatus(port)&CARD_F_PRESENT)) {
@@ -4085,42 +3266,22 @@ int CCaetla::DownloadMemCardFile(void *dest, int port, int mfile) {
 
 	IssueCommand(CAETLA_CARD_DOWNLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		Send8(port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Send8(mfile);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		numblk = ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	}
-	break;
-
-	default:
-	case CART_PAR: {
+	{
 		Swap8(port);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		Swap8(mfile);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 		numblk = Swap8(0);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
-	}
-	break;
 	}
 
 	m_MemCardFileSize = numblk * CARD_BLOCK_SIZE;
@@ -4135,16 +3296,7 @@ int CCaetla::DownloadMemCardFile(void *dest, int port, int mfile) {
 //		for (i=0;i<(numblk*CARD_BLOCK_SIZE);i++)
 		i = 0;
 		while ((i < numblk * CARD_BLOCK_SIZE) && (m_ErrorCode == CAETLA_ERROR_OK)) {
-			switch (m_CartType) {
-			case CART_XP:
-				*cdata++ = ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				*cdata++ = Swap8(0);
-				break;
-			}
+			*cdata++ = Swap8(0);
 
 			pc = (i * 50) / (numblk * CARD_BLOCK_SIZE);
 			if (pc > lpc) {
@@ -4157,68 +3309,28 @@ int CCaetla::DownloadMemCardFile(void *dest, int port, int mfile) {
 		EndProgressBar();
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
-		switch (m_CartType) {
-		case CART_XP: {
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
-
-		default:
-		case CART_PAR: {
+		{
 			Send16(0);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
 			Send16(0);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
-		}
-		break;
 		}
 
 	} else {
 		Say("Memory Card File %d in slot %d not found\n", mfile, port + 1);
 
-		switch (m_CartType) {
-		case CART_XP: {
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
-
-		default:
-		case CART_PAR: {
+		{
 			Send16(0);
 			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
+				return m_ErrorCode;
 			}
-		}
-		break;
 		}
 	}
 
@@ -4281,12 +3393,12 @@ int CCaetla::UploadMemCardFile(char *name, void *data, int port, int mfile, int 
 
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	ScanMemCards(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 // Quickly check for either non-presence of memcard, or insufficient room
@@ -4311,12 +3423,12 @@ int CCaetla::UploadMemCardFile(char *name, void *data, int port, int mfile, int 
 
 	IssueCommand(CAETLA_CARD_UPLOAD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(port);
 	Send8(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 #if 0   //DISABLE
@@ -4332,32 +3444,23 @@ int CCaetla::UploadMemCardFile(char *name, void *data, int port, int mfile, int 
 		i++;
 	}
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(0);
 	Send8(0);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(size);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP:
-		numblk = ByteIn(m_Port);
-		break;
-
-	default:
-	case CART_PAR:
-		numblk = Swap8(0);
-		break;
-	}
+	numblk = Swap8(0);
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (numblk) {
@@ -4381,65 +3484,26 @@ int CCaetla::UploadMemCardFile(char *name, void *data, int port, int mfile, int 
 		}
 		EndProgressBar();
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
-		switch (m_CartType) {
-		case CART_XP: {
-			Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
+		m_MemCards[port].status = Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
-		break;
-
-		default:
-		case CART_PAR: {
-			m_MemCards[port].status = Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			Send16(0);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
+		Send16(0);
+		if (m_ErrorCode != CAETLA_ERROR_OK)  {
+			return m_ErrorCode;
 		}
 	}
 
 	else {
 		Say("Error - Unable to upload Memory Card file\n");
 
-		switch (m_CartType) {
-		case CART_XP: {
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-			ByteIn(m_Port);
-			if (m_ErrorCode != CAETLA_ERROR_OK)  {
-				complete(m_ErrorCode);
-			}
-		}
-		break;
-
-		default:
-		case CART_PAR:
-			Send16(0);
-			break;
-		}
+		Send16(0);
 
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 	}
 
@@ -4526,7 +3590,7 @@ int CCaetla::DeleteMemCardFile(int port, int mfile) {
 
 		ReadCardSectors((void *)&m_MemCardImages[port].image, port, 0, CARD_SECTOR_SIZE * 16);
 		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
+			return m_ErrorCode;
 		}
 
 // Start scanning at the first sector so our pre-increment seek works OK.
@@ -4561,7 +3625,7 @@ int CCaetla::DeleteMemCardFile(int port, int mfile) {
 int CCaetla::FormatMemCard(int port) {
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (!(GetCardStatus(port)&CARD_F_PRESENT)) {
@@ -4589,7 +3653,7 @@ int CCaetla::BackupCard(char *fname, int port) {
 
 	ReadCardSectors((void *)&m_MemCardImages[port].image, port, 0, CARD_SIZE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	file = fopen(fname, "wb");
@@ -4644,7 +3708,7 @@ int CCaetla::ReadCardSectors(void *data, int port, int start, int len) {
 
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (!(GetCardStatus(port)&CARD_F_PRESENT)) {
@@ -4654,21 +3718,21 @@ int CCaetla::ReadCardSectors(void *data, int port, int start, int len) {
 
 	IssueCommand(CAETLA_CARD_READSECTOR);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(port);
 	Send8(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(start / CARD_SECTOR_SIZE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(len);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	{
@@ -4681,16 +3745,7 @@ int CCaetla::ReadCardSectors(void *data, int port, int start, int len) {
 		i = 0;
 		while ((i < len) && (m_ErrorCode == CAETLA_ERROR_OK)) {
 
-			switch (m_CartType) {
-			case CART_XP:
-				cdata[i+start] = ByteIn(m_Port);
-				break;
-
-			default:
-			case CART_PAR:
-				cdata[i+start] = Swap8(0);
-				break;
-			}
+			cdata[i+start] = Swap8(0);
 
 			pc = (i * 50) / len;
 			if (pc > lpc) {
@@ -4704,43 +3759,16 @@ int CCaetla::ReadCardSectors(void *data, int port, int start, int len) {
 	}
 
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		//      Send16(0);
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
+	Send16(0);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
 	}
-	break;
-
-	default:
-	case CART_PAR: {
-		Send16(0);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Send16(0);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	}
-	break;
+	Send16(0);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
 	}
 
 	return(m_ErrorCode);
@@ -4765,7 +3793,7 @@ int CCaetla::WriteCardSectors(void *data, int port, int start, int len) {
 
 	Listen(CAETLA_MODE_MEMCARD);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	if (!(GetCardStatus(port)&CARD_F_PRESENT)) {
@@ -4775,21 +3803,21 @@ int CCaetla::WriteCardSectors(void *data, int port, int start, int len) {
 
 	IssueCommand(CAETLA_CARD_WRITESECTOR);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 //	Swap8(port);
 	Send8(port);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 	Send16(start / CARD_SECTOR_SIZE);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	Send32(len);
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
 	{
@@ -4813,38 +3841,16 @@ int CCaetla::WriteCardSectors(void *data, int port, int start, int len) {
 		EndProgressBar();
 	}
 	if (m_ErrorCode != CAETLA_ERROR_OK)  {
-		complete(m_ErrorCode);
+		return m_ErrorCode;
 	}
 
-	switch (m_CartType) {
-	case CART_XP: {
-		Send16(0);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		ByteIn(m_Port);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
+	Send16(0);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
 	}
-	break;
-
-	default:
-	case CART_PAR: {
-		Send16(0);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-		Send16(0);
-		if (m_ErrorCode != CAETLA_ERROR_OK)  {
-			complete(m_ErrorCode);
-		}
-	}
-	break;
+	Send16(0);
+	if (m_ErrorCode != CAETLA_ERROR_OK)  {
+		return m_ErrorCode;
 	}
 
 	return(m_ErrorCode);
@@ -4866,9 +3872,6 @@ int CCaetla::SendUpgrade(void *pdata, uint32 addr, uint32 length, bool rom) {
 	uint8   *data, r;
 	uint32   count;
 	int             pc, lpc;
-
-	if (m_CartType != CART_PAR)
-		return(0);
 
 //	m_TimeOut=0;
 	m_TimeOut = _SECONDS(10);

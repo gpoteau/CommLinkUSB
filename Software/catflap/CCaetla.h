@@ -6,7 +6,7 @@
 // CCaetla Class - (C) 1998 Intar Technologies Limited
 
 #include "CCaetlaDefs.h"
-
+#include "CommLinkUSB.h"
 
 class CCaetla {
 // Construction
@@ -21,7 +21,7 @@ public:
 	int             StartNTService(void);
 	int             StopNTService(void);
 
-	void            Init(int, int);
+	void            Init();
 
 	int             GetVersion(void);
 
@@ -102,12 +102,11 @@ public:
 	void            Say(const char *, ...);
 	void            Dump(const char *, ...);
 
+	CommLinkUSB		m_CommLinkUSB;
 
 	int             m_ErrorCode;
 	uint32  m_TimeOut;
 
-	int             m_Port;
-	int             m_CartType;
 	char            *m_LogFile;
 	FILE            *m_FpLog;
 
@@ -161,12 +160,6 @@ protected:
 	uint8   ByteIn(int);
 	void            ByteOut(int, uint8);
 	int             Handshake(int);
-
-	void            CreateXPLookup(void);
-	uint8   XpAck1(void);
-	uint8   XpAck1_N(void);
-	uint8   XpAck2(void);
-//	uint8    XpAck2_N(void);
 
 	uint8   Receive(void);
 	uint16  Send16(uint16);

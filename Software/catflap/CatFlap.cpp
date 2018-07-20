@@ -158,8 +158,6 @@ char            *m_Log = NULL;
 
 char            *m_Ini = NULL;
 
-char PPdevice[MAX_PPDEV_SIZE];
-
 ////////////////////////////////////////////////////////////////////////////////
 // Multi-purpose Number parser :)
 
@@ -367,7 +365,7 @@ int CmdCallback_Run(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -475,7 +473,7 @@ int CmdCallback_Send(int argc, char *argv[]) {
 // Initialise our comms port
 
 		printf("Initializing Caetla...\n");
-		m_Caetla.Init(ARPort, m_CartType);
+		m_Caetla.Init();
 
 		if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -537,7 +535,7 @@ int CmdCallback_Receive(int argc, char *argv[]) {
 // Initialise our comms port
 
 		printf("Initializing Caetla...\n");
-		m_Caetla.Init(ARPort, m_CartType);
+		m_Caetla.Init();
 
 		if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -570,7 +568,7 @@ int CmdCallback_Reset(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -593,7 +591,7 @@ int CmdCallback_Resume(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -622,7 +620,7 @@ int CmdCallback_Console(int argc, char *argv[]) {
 	}
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -753,7 +751,7 @@ int CmdCallback_SendVRAM(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -830,7 +828,7 @@ int CmdCallback_GetVRAM(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -904,7 +902,7 @@ int CmdCallback_ListCards(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -995,7 +993,7 @@ int CmdCallback_DownCardFile(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1051,7 +1049,7 @@ int CmdCallback_UpCardFile(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1101,7 +1099,7 @@ int CmdCallback_BackupCard(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1157,7 +1155,7 @@ int CmdCallback_RestoreCard(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1202,7 +1200,7 @@ int CmdCallback_FormatCard(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1255,7 +1253,7 @@ int CmdCallback_DeleteCard(int argc, char *argv[]) {
 // Initialise our comms port
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
 
@@ -1303,7 +1301,7 @@ int CmdCallback_FlashEPROM(int argc, char *argv[]) {
 	}
 
 	printf("Initializing Caetla...\n");
-	m_Caetla.Init(ARPort, m_CartType);
+	m_Caetla.Init();
 
 	m_Caetla.FlashEPROM(fname);
 	if (m_Caetla.ShowError())  return(EXIT_FAILURE);
@@ -1489,12 +1487,9 @@ int main(int argc, char *argv[]) {
 
 // Show ubiquitous Copyright message or whatever
 
-	// FIXME: need some checks here...
-	iopl(3);
-
 	printf("\n"
 	       "+------------------------------------------------------------+-------+\n"
-	       "| CatFlap for Linux           (Control for PSX & Caetla ROM) | v%d.%02d |\n"
+	       "| CatFlap for CommLinkUSB     (Control for PSX & Caetla ROM) | v%d.%02d |\n"
 	       "+------------------------------------------------------------+-------+\n\n"
 	       , LVER, LREV);
 // Init Args-handler
@@ -1527,33 +1522,10 @@ int main(int argc, char *argv[]) {
 	{
 		char    *EnvVal;
 
-
-// Commslink Port
-
-		ARPort = CAETLA_DEF_PORT;
-		EnvVal = getenv("AR_PORT");
-		if (EnvVal) {
-			int Port;
-			if (sscanf(EnvVal, "%x", &Port) == 1)
-				ARPort = Port;
-		}
-		EnvVal = getenv("CF_PORT");
-		if (EnvVal) {
-			sscanf(EnvVal, "%s", PPdevice);
-		} else {
-			strncpy(PPdevice, CAETLA_DEF_PPDEV, MAX_PPDEV_SIZE);
-		}
-
 // Keyboard redirection
 
 		m_Caetla.m_KeyIn = 0;
-		EnvVal = getenv("AR_PSXKEYIN");
-		if (EnvVal) {
-			int KeyIn;
-			if (sscanf(EnvVal, "%x", &KeyIn) == 1)
-				m_Caetla.m_KeyIn = KeyIn;
-		}
-		EnvVal = getenv("CF_PSXKEYIN");
+		EnvVal = getenv("CLUSB_PSXKEYIN");
 		if (EnvVal) {
 			int KeyIn;
 			if (sscanf(EnvVal, "%x", &KeyIn) == 1)
@@ -1563,13 +1535,7 @@ int main(int argc, char *argv[]) {
 // Args redirection
 
 		ARArgs = 0;
-		EnvVal = getenv("AR_PSXARGS");
-		if (EnvVal) {
-			int Args;
-			if (sscanf(EnvVal, "%x", &Args) == 1)
-				ARArgs = Args;
-		}
-		EnvVal = getenv("CF_PSXARGS");
+		EnvVal = getenv("CLUSB_PSXARGS");
 		if (EnvVal) {
 			int Args;
 			if (sscanf(EnvVal, "%x", &Args) == 1)

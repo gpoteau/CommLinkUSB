@@ -32,6 +32,7 @@ enum {
 	CAETLA_ERROR_MC_CARDFULL,
 	CAETLA_ERROR_MC_NOTFORMATTED,
 	CAETLA_ERROR_MC_FILEEXISTS,
+	CAETLA_ERROR_DEVICE_NOT_PRESENT,
 };
 
 typedef struct CaetlaErrorMsg {
@@ -221,15 +222,8 @@ typedef struct {
 	uint8   target;
 }   CPE_TARGET;
 
-#define MAX_PPDEV_SIZE 64
-
 #define CAETLA_DOSCON_PROMPT    "% "
 #define CAETLA_SOFTWARE_TIMEOUT 100000000
-
-
-#define CAETLA_DEF_PPDEV    "/dev/parport0"
-#define CAETLA_DEF_PORT     0x378
-#define CAETLA_DEF_CART     CART_XP
 
 
 #endif  //_CCAETLADEFS_H_
