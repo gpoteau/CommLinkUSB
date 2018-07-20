@@ -374,8 +374,6 @@ int CCaetla::Resume(void) {
 }
 
 
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // Exchange Byte
 // Used for both Send & Receive, as each mode ignores the inappropriate data
