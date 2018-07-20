@@ -3,6 +3,8 @@
 
 #include "common_defs.h"
 
+struct libusb_device_handle;
+
 class CommLinkUSB {
 public:
     CommLinkUSB();
@@ -10,10 +12,11 @@ public:
 
     bool Initialize();
 
-    bool SendByte(uint8 data, uint32 timeout);
-    bool ReceiveByte(uint8* data, uint32 timeout);
+    int SendByte(uint8 data, uint32 timeout);
+    int ReceiveByte(uint8* data, uint32 timeout);
 
 private:
+    libusb_device_handle* deviceHandle;
 };
 
 

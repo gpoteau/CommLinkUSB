@@ -116,9 +116,9 @@
 #define     VER     2
 #define     REV     36
 
-// Linux version
-#define		LVER	0
-#define		LREV	1
+// Version
+#define		LVER	1
+#define		LREV	0
 
 #define     PROGNAME    "CatFlap"
 
@@ -1645,7 +1645,7 @@ cleanexit:
 // Show program usage/options etc
 
 void usage(void) {
-	printf("\nType CATFLAP HELP if you require assistance.\n");
+	printf("\nType CATFLAPU HELP if you require assistance.\n");
 }
 
 

@@ -32,7 +32,7 @@
 
 #define     complete(x) { m_ErrorCode=x; return(x); }
 
-#define     _SECONDS(x) ((int)((float)x*1000))
+#define     _SECONDS(x) ((int)((x)*1000))
 
 static int          pp_fd;
 static uint8   last_data;
@@ -381,17 +381,11 @@ int CCaetla::Resume(void) {
 // Used for both Send & Receive, as each mode ignores the inappropriate data
 
 uint8 CCaetla::Swap8(uint8 data) {
-	m_ErrorCode = CAETLA_ERROR_OK;
+	m_ErrorCode = m_CommLinkUSB.SendByte(data, m_TimeOut);
+	if (m_ErrorCode != CAETLA_ERROR_OK) return 0;
 
-	if (!m_CommLinkUSB.SendByte(data, m_TimeOut)) {
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return 0;
-	}
-
-	if (!m_CommLinkUSB.ReceiveByte(&data, m_TimeOut)) {
-		m_ErrorCode = CAETLA_ERROR_TIMEOUT;
-		return 0;
-	}
+	m_ErrorCode = m_CommLinkUSB.ReceiveByte(&data, m_TimeOut);
+	if (m_ErrorCode != CAETLA_ERROR_OK) return 0;
 
 	return data;
 }
